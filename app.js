@@ -447,7 +447,7 @@ function pintarForm(){
     '<input type="text" data-f="reg" value="'+esc(f.reg||autor)+'" placeholder="Nombre y apellido">'+
     '<span class="hint">Queda asociado a la reserva y al historial de cambios.</span></div></div>');
   h.push('</div><div class="card-f"><button class="btn pri" data-a="guardar"'+(f.ajena?" disabled":"")+'>Guardar</button>'+
-    (editar?'<button class="btn" data-a="borrar"'+((f.ajena||!esAdmin)?" disabled":"")+'>Eliminar</button>':'')+
+    (editar?'<button class="btn" data-a="borrar"'+(f.ajena?" disabled":"")+'>Eliminar</button>':'')+
     '<span class="spacer"></span><button class="btn gh" data-a="cerrar">Cancelar</button></div></div></div>');
   modal=h.join("");paint();
 }
@@ -823,11 +823,9 @@ document.addEventListener("click",function(e){
   else if(a==="impAnalizar"){analizar();pintarImport();}
   else if(a==="impAplicar"){aplicarImport();}
   else if(a==="guardar"){guardarReserva();}
-  if(!esAdmin){exigirAdmin("");return;}
-  {
+  else if(a==="borrar"){
+    if(!esAdmin){exigirAdmin("");return;}
     var rb=null;state.reservas.forEach(function(x){if(x.id===form.id)rb=x;});
-    if(rb&&!mio(rb)&&!esAdmin){form.ajena=true;form.dueno=rb.por||"";
-      form.err="Eliminar una reserva de otra persona requiere la clave de administrador.";pintarForm();return;}
     if(rb)apunta("eliminar",refDe(rb),resumen(rb),[]);
     state.reservas=state.reservas.filter(function(r){return r.id!==form.id;});
     modal=null;form=null;save();}

@@ -132,6 +132,14 @@ function tocaAjenas(anterior, nuevo, autor) {
   return false;
 }
 
+/* Devuelve true si el nuevo estado elimina reservas que ya existian. */
+function hayEliminadas(anterior, nuevo) {
+  const A = porId(anterior);
+  const B = porId(nuevo);
+  for (const id in A) if (!B[id]) return true;
+  return false;
+}
+
 function saneaEntradas(entradas, autor, ahora) {
   if (!Array.isArray(entradas)) return [];
   return entradas.slice(0, 40).map((e) => ({
@@ -218,12 +226,15 @@ export default async function handler(req, res) {
       const cambiaConfig = !!anterior && !configIgual(anterior, body.estado);
       const cambiaClaves = body.codigoNuevo != null || body.adminNuevo != null;
       const ajenas = tocaAjenas(anterior, body.estado, autor);
+      const borra = !!anterior && hayEliminadas(anterior, body.estado);
 
-      if ((cambiaConfig || cambiaClaves || ajenas) && !esAdmin) {
+      if ((cambiaConfig || cambiaClaves || ajenas || borra) && !esAdmin) {
         return res.status(403).json({
           error: "admin_requerido",
-          motivo: cambiaClaves ? "claves" : cambiaConfig ? "configuracion" : "reservas_ajenas",
-          mensaje: ajenas
+          motivo: cambiaClaves ? "claves" : cambiaConfig ? "configuracion" : borra ? "eliminacion" : "reservas_ajenas",
+          mensaje: borra
+            ? "Eliminar reservas requiere la clave de administrador."
+            : ajenas
             ? "Modificar o eliminar reservas registradas por otra persona requiere la clave de administrador."
             : "Este cambio requiere la clave de administrador.",
         });
