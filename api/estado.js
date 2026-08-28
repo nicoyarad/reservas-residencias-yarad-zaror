@@ -226,12 +226,12 @@ export default async function handler(req, res) {
       const cambiaConfig = !!anterior && !configIgual(anterior, body.estado);
       const cambiaClaves = body.codigoNuevo != null || body.adminNuevo != null;
       const ajenas = tocaAjenas(anterior, body.estado, autor);
-      const borra = !!anterior && hayEliminadas(anterior, body.estado);  
+      const borra = !!anterior && hayEliminadas(anterior, body.estado);
 
-      if ((cambiaConfig || cambiaClaves || ajenas|| borra) && !esAdmin) {
+      if ((cambiaConfig || cambiaClaves || ajenas || borra) && !esAdmin) {
         return res.status(403).json({
           error: "admin_requerido",
-          motivo: cambiaClaves ? "claves" : cambiaConfig ? "configuracion" : "reservas_ajenas",
+          motivo: cambiaClaves ? "claves" : cambiaConfig ? "configuracion" : borra ? "eliminacion" : "reservas_ajenas",
           mensaje: borra
             ? "Eliminar reservas requiere la clave de administrador."
             : ajenas
