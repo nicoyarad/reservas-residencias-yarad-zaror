@@ -61,7 +61,47 @@ Redis tiene prioridad si ambas están presentes.
 
 ---
 
-## 3. Código de acceso
+## 3. Claves: acceso y administración
+
+Hay dos claves con propósitos distintos.
+
+| Clave | Valor inicial | Para qué sirve | Variable de respaldo |
+|---|---|---|---|
+| Código de acceso | `1962` | Ver el calendario y registrar reservas propias | `CODIGO_ACCESO` |
+| Clave de administrador | `1989` | Historial de cambios, configuración, importar CSV, descargar CSV, borrar todo, editar o eliminar reservas de otras personas | `CODIGO_ADMIN` |
+
+Ambas se cambian desde **Configurar** y quedan guardadas junto al calendario.
+Las variables de entorno funcionan siempre como respaldo maestro, por si se
+pierde la clave guardada.
+
+### Autoría y historial
+
+Al entrar se pide el nombre de quien va a registrar. Queda recordado en ese
+navegador y aparece precargado —y editable— en cada formulario, de modo que
+toda reserva creada, modificada o eliminada queda con nombre y hora.
+
+El administrador ve la pestaña **Historial**: fecha y hora, quién registró,
+acción, reserva afectada y, en las modificaciones, el valor anterior y el
+nuevo. Es filtrable y exportable a CSV. El historial se guarda fuera del
+estado editable: el navegador no puede borrarlo al guardar, y la API solo lo
+entrega a quien envía la clave de administrador.
+
+### Qué se hace valer en el servidor
+
+La API rechaza con 403, sin importar lo que haga el navegador:
+
+- cambios de título, lugares o asistentes sin clave de administrador;
+- cambios de cualquiera de las dos claves sin clave de administrador;
+- modificar o eliminar reservas registradas por otra persona.
+
+Las reservas sin autor (datos de ejemplo o anteriores a esta versión) quedan
+editables por cualquiera con el código de acceso.
+
+Los botones de descargar CSV y borrar todo se bloquean en la interfaz: quien
+tenga el código de acceso podría leer los datos consultando la API
+directamente, así que ese bloqueo es una comodidad, no una barrera.
+
+## 4. Código de acceso (referencia rápida)
 
 - Valor inicial: **1962**.
 - Se cambia desde la propia aplicación: **Configurar → Código de acceso**
@@ -78,7 +118,7 @@ Redis tiene prioridad si ambas están presentes.
 
 ---
 
-## 4. Formato CSV de importación
+## 5. Formato CSV de importación
 
     Lugar;Cupo;Asistente;Adultos;Ninos;Total personas;Desde;Hasta;Dias;Nota
     Residencia A;4;J. Pérez;2;1;3;2026-09-01;2026-09-07;7;Turno día
@@ -97,10 +137,9 @@ Redis tiene prioridad si ambas están presentes.
 
 ---
 
-## 5. Estructura y funcionamiento
+## 6. Estructura y funcionamiento
 
-    index.html        estructura y estilos de la aplicación
-    app.js            lógica completa de la aplicación
+    index.html        aplicación completa (HTML + CSS + JS en un archivo)
     api/estado.js     función serverless: lectura y escritura del estado
     package.json      dependencias (@upstash/redis, @vercel/blob)
     vercel.json       cabeceras sin caché para /api
@@ -108,11 +147,17 @@ Redis tiene prioridad si ambas están presentes.
 
 **API**
 
-    GET  /api/estado    cabecera x-codigo -> { rev, estado }
-    POST /api/estado    cabecera x-codigo, cuerpo { base, estado, codigoNuevo? }
+    GET  /api/estado    cabeceras x-codigo, x-admin (opcional)
+                        -> { rev, estado, admin, log? }   el log solo a administradores
+    POST /api/estado    cabeceras x-codigo, x-admin (opcional)
+                        cuerpo { base, estado, autor, entradas[], codigoNuevo?, adminNuevo? }
+                        400 datos inválidos (incluye autor ausente)
                         401 código ausente o incorrecto
+                        403 requiere clave de administrador
                         409 otro guardó primero (devuelve rev y estado vigentes)
                         503 sin almacenamiento configurado
+
+El documento guardado es { rev, codigo, admin, log[], estado{} }.
 
 **Concurrencia.** Cada guardado envía la revisión (`rev`) sobre la que se
 trabajó. Si otra persona guardó primero, la API responde 409 y la página se
