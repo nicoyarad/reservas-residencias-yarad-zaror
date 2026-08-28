@@ -11,10 +11,22 @@ var state=JSON.parse(stateEl.textContent);
 var root=document.getElementById("root");
 var link="wait",readOnly=false,saving=false;
 var modal=null,drag=null;
-var codigo="",authed=false,gate={valor:"",err:"",probando:false},nuevoCodigo="";
+var codigo="",authed=false,gate={valor:"",err:"",probando:false},nuevoCodigo="",nuevoAdmin="";
+var autor="",admin="",esAdmin=false,logAdmin=[],entradas=[];
+var pedirAutor=false,pedirAdmin=false,autorTmp="",adminTmp="",adminErr="",fHist="";
 try{codigo=localStorage.getItem("resid.cod")||"";}catch(e){}
+try{autor=localStorage.getItem("resid.por")||"";}catch(e){}
+try{admin=localStorage.getItem("resid.adm")||"";}catch(e){}
 function guardarCod(c){codigo=c;try{c?localStorage.setItem("resid.cod",c):localStorage.removeItem("resid.cod");}catch(e){}}
-function cab(){return codigo?{"x-codigo":codigo}:{};}
+function guardarAutor(v){autor=v;try{v?localStorage.setItem("resid.por",v):localStorage.removeItem("resid.por");}catch(e){}}
+function guardarAdmin(v){admin=v;try{v?localStorage.setItem("resid.adm",v):localStorage.removeItem("resid.adm");}catch(e){}}
+function cab(){var h={};if(codigo)h["x-codigo"]=codigo;if(admin)h["x-admin"]=admin;return h;}
+function apunta(acc,ref,det,camb){entradas.push({por:autor,acc:acc,ref:ref||"",det:det||"",camb:camb||[]});}
+function resumen(r){var l=lugar(r.lugar);
+  return (l?l.nombre:"?")+" · "+r.persona+" · "+r.desde+" a "+((r.abierta||!r.hasta)?"sin término":r.hasta)+" · "+qty(r);}
+function refDe(r){var l=lugar(r.lugar);return (l?l.nombre:"?")+" · "+r.persona;}
+function mio(r){var d=String((r&&r.por)||"").trim().toLowerCase();
+  return !d||d===String(autor||"").trim().toLowerCase();}
 
 function d2n(iso){var p=iso.split("-");return Math.round(Date.UTC(+p[0],+p[1]-1,+p[2])/DAY);}
 function n2d(n){var d=new Date(n*DAY);return d.toISOString().slice(0,10);}
@@ -41,7 +53,7 @@ function colW(){
 state.reservas.forEach(function(r){if(r.adultos==null)r.adultos=1;if(r.ninos==null)r.ninos=0;});
 
 /* ---------- persistencia en el servidor ---------- */
-var rev=0,aviso="";
+var rev=0,aviso="",detalle="";
 function migrar(){
   if(!state.lugares)state.lugares=[];
   if(!state.asistentes)state.asistentes=[];
@@ -59,20 +71,27 @@ function cargar(){
     return r.json();
   }).then(function(d){
     if(!d)return;
-    authed=true;gate.err="";rev=d.rev||0;
+    authed=true;gate.err="";detalle="";rev=d.rev||0;
+    esAdmin=!!d.admin;logAdmin=Array.isArray(d.log)?d.log:[];
+    if(d.adminError){guardarAdmin("");esAdmin=false;adminErr="La clave de administrador no es válida.";}
     if(d.estado){state=d.estado;migrar();link="ok";paint();}
     else{link="ok";guardarServidor();}
-  }).catch(function(){gate.probando=false;link="err";paint();});
+  }).catch(function(e){gate.probando=false;link="err";detalle=String((e&&e.message)||"");paint();});
 }
 function guardarServidor(){
   saving=true;aviso="";paint();
-  var cuerpo={base:rev,estado:state};
+  if(!autor){saving=false;link="ok";pedirAutor=true;paint();return;}
+  var cuerpo={base:rev,estado:state,autor:autor,entradas:entradas};
   if(nuevoCodigo)cuerpo.codigoNuevo=nuevoCodigo;
+  if(nuevoAdmin)cuerpo.adminNuevo=nuevoAdmin;
   fetch("/api/estado",{method:"POST",
     headers:Object.assign({"Content-Type":"application/json"},cab()),
     body:JSON.stringify(cuerpo)}).then(function(r){
     if(r.status===401){saving=false;authed=false;guardarCod("");nuevoCodigo="";gate.err="La sesión expiró o el código cambió. Ingrese el código vigente.";paint();return;}
-    if(r.status===400)return r.json().then(function(d){saving=false;nuevoCodigo="";aviso=(d&&d.mensaje)||"El dato enviado no es válido.";paint();});
+    if(r.status===400)return r.json().then(function(d){saving=false;nuevoCodigo="";nuevoAdmin="";entradas=[];
+      aviso=(d&&d.mensaje)||"El dato enviado no es válido.";cargar();});
+    if(r.status===403)return r.json().then(function(d){saving=false;nuevoCodigo="";nuevoAdmin="";entradas=[];
+      aviso=(d&&d.mensaje)||"Este cambio requiere la clave de administrador. No se guardó.";cargar();});
     if(r.status===409)return r.json().then(function(d){
       if(d.estado){state=d.estado;migrar();}
       rev=d.rev||rev;saving=false;link="ok";
@@ -82,16 +101,21 @@ function guardarServidor(){
     if(r.status===503){saving=false;link="nostore";paint();return;}
     if(!r.ok)throw new Error("HTTP "+r.status);
     return r.json().then(function(d){
-      rev=d.rev||rev;saving=false;link="ok";
-      if(nuevoCodigo){guardarCod(nuevoCodigo);nuevoCodigo="";aviso="Código de acceso actualizado. Comuníquelo a quienes deban anotarse.";}
-      paint();});
-  }).catch(function(){saving=false;link="err";paint();});
+      rev=d.rev||rev;saving=false;link="ok";detalle="";entradas=[];
+      var m=[];
+      if(nuevoCodigo){guardarCod(nuevoCodigo);nuevoCodigo="";m.push("Código de acceso actualizado.");}
+      if(nuevoAdmin){guardarAdmin(nuevoAdmin);nuevoAdmin="";m.push("Clave de administrador actualizada.");}
+      if(m.length)aviso=m.join(" ")+" Comuníquela a quien corresponda.";
+      if(esAdmin)cargar();else paint();});
+  }).catch(function(e){saving=false;link="err";detalle=String((e&&e.message)||"");paint();});
 }
 function sincronizar(){
   if(saving||modal||!authed||!codigo)return;
   fetch("/api/estado",{cache:"no-store",headers:cab()}).then(function(r){return r.ok?r.json():null;})
     .then(function(d){
-      if(d&&d.estado&&(d.rev||0)!==rev){state=d.estado;rev=d.rev||0;migrar();link="ok";paint();}
+      if(d&&d.estado&&(d.rev||0)!==rev){state=d.estado;rev=d.rev||0;migrar();
+        if(Array.isArray(d.log))logAdmin=d.log;
+        link="ok";paint();}
     }).catch(function(){});
 }
 
@@ -129,6 +153,8 @@ function qty(r){var ad=Math.max(0,+r.adultos||0),ni=Math.max(0,+r.ninos||0);
 /* ---------- render ---------- */
 function paint(){
   if(!authed){root.innerHTML=gateHtml();return;}
+  if(!autor||pedirAutor){root.innerHTML=autorHtml();return;}
+  if(vp.tab==="hist"&&!esAdmin)vp.tab="cal";
   var D=dias(),a=d2n(vp.inicio),b=a+D-1,cw=colW(),tw=D*cw,tn=d2n(todayIso());
   var h=[];
   h.push('<div class="wrap">');
@@ -150,10 +176,17 @@ function paint(){
     return '<button data-a="preset" data-v="'+o[0]+'" aria-pressed="'+(D===o[0])+'">'+o[1]+'</button>';}).join("")+'</div>');
   h.push('<div class="seg">'+
     '<button data-a="tab" data-v="cal" aria-pressed="'+(vp.tab==="cal")+'">Calendario</button>'+
-    '<button data-a="tab" data-v="lista" aria-pressed="'+(vp.tab==="lista")+'">Registro</button></div>');
+    '<button data-a="tab" data-v="lista" aria-pressed="'+(vp.tab==="lista")+'">Registro</button>'+
+    (esAdmin?'<button data-a="tab" data-v="hist" aria-pressed="'+(vp.tab==="hist")+'">Historial</button>':'')+
+    '</div>');
   h.push('<span class="spacer"></span>');
   if(!readOnly){
-    h.push('<div class="acts"><button class="btn gh" data-a="salir" title="Olvidar el código en este dispositivo">Salir</button>'+
+    h.push('<div class="acts">'+
+      '<button class="btn gh" data-a="quien" title="Cambiar el nombre con que se registran los cambios">Registra: <strong>'+esc(autor)+'</strong></button>'+
+      (esAdmin
+        ? '<button class="btn adm" data-a="lock" title="Salir del modo administrador">Administrador &#10003;</button>'
+        : '<button class="btn gh" data-a="unlock" title="Ingresar la clave de administrador">Administrador</button>')+
+      '<button class="btn gh" data-a="salir" title="Olvidar el código en este dispositivo">Salir</button>'+
       '<button class="btn" data-a="import">Importar CSV</button>'+
       '<button class="btn" data-a="cfg">Configurar</button>'+
       '<button class="btn pri" data-a="nueva">+ Nueva reserva</button></div>');
@@ -162,10 +195,15 @@ function paint(){
 
   if(link==="nostore"){h.push('<div class="notice"><strong>Almacenamiento no configurado.</strong> El calendario funciona, pero las reservas no se guardan. '+
     'En el panel de Vercel: Storage &#8594; Create Database &#8594; Blob (o Upstash for Redis), conectar al proyecto y volver a desplegar.</div>');}
-  else if(link==="err"){h.push('<div class="notice"><strong>Sin conexión con el servidor.</strong> El último cambio no se guardó; vuelva a intentarlo en unos segundos.</div>');}
+  else if(link==="err"){h.push('<div class="notice"><strong>Sin conexión con el servidor.</strong> '+
+    (detalle==="HTTP 404"?'La función <code>/api/estado</code> no está publicada en este despliegue: falta la carpeta <code>api</code> o el archivo <code>package.json</code>.':
+     'El último cambio no se guardó; vuelva a intentarlo en unos segundos.')+
+    (detalle?' <span class="chip">'+esc(detalle)+'</span>':'')+'</div>');}
+  if(adminErr){h.push('<div class="notice"><strong>Administrador.</strong> '+esc(adminErr)+'</div>');}
   if(aviso){h.push('<div class="notice"><strong>Atención.</strong> '+esc(aviso)+'</div>');}
 
   if(vp.tab==="cal")h.push(calHtml(a,b,cw,tw,tn));
+  else if(vp.tab==="hist")h.push(historialHtml());
   else h.push(listaHtml());
 
   h.push('<div class="legend">'+
@@ -186,11 +224,93 @@ function gateHtml(){
     '<div class="card-b">'+
     '<span class="lead">Calendario interno de Yarad Zaror. Ingrese el código de acceso para ver y registrar reservas.</span>'+
     (gate.err?'<div class="err">'+esc(gate.err)+'</div>':'')+
-    (link==="err"?'<div class="err">Sin conexión con el servidor. Intente de nuevo en unos segundos.</div>':'')+
+    (link==="err"?'<div class="err">Sin conexión con el servidor'+(detalle?' ('+esc(detalle)+')':'')+'.'+
+      (detalle==="HTTP 404"?' Falta publicar la función /api/estado.':' Intente de nuevo en unos segundos.')+'</div>':'')+
     '<div class="fld"><label>Código de acceso</label>'+
     '<input type="password" inputmode="numeric" autocomplete="off" data-g="valor" value="'+esc(gate.valor)+'" placeholder="&#8226;&#8226;&#8226;&#8226;"></div>'+
     '</div><div class="card-f"><button class="btn pri" data-a="entrar"'+(gate.probando?" disabled":"")+'>'+
     (gate.probando?"Verificando…":"Entrar")+'</button></div></div></div>';
+}
+
+function autorHtml(){
+  return '<div class="gate"><div class="card"><div class="card-h"><h2>¿Quién registra?</h2></div>'+
+    '<div class="card-b">'+
+    '<span class="lead">Indique su nombre. Queda asociado a cada reserva que registre o modifique y aparece en el historial de cambios.</span>'+
+    '<div class="fld"><label>Nombre y apellido</label>'+
+    '<input type="text" data-t="autor" value="'+esc(autorTmp||autor)+'" placeholder="Ej.: M. Rojas"></div>'+
+    '</div><div class="card-f"><button class="btn pri" data-a="setAutor">Continuar</button>'+
+    (autor?'<span class="spacer"></span><button class="btn gh" data-a="cancelAutor">Cancelar</button>':'')+
+    '</div></div></div>';
+}
+
+function adminHtml(){
+  return '<div class="ov" data-ov="1"><div class="card"><div class="card-h"><h2>Clave de administrador</h2>'+
+    '<button class="btn sm gh" data-a="cerrar">Cerrar</button></div><div class="card-b">'+
+    '<span class="hint">Habilita el historial de cambios, la configuración, la importación y la edición de reservas registradas por otras personas.</span>'+
+    (adminErr?'<div class="err">'+esc(adminErr)+'</div>':'')+
+    '<div class="fld"><label>Clave</label>'+
+    '<input type="password" inputmode="numeric" autocomplete="off" data-t="admin" value="'+esc(adminTmp)+'" placeholder="&#8226;&#8226;&#8226;&#8226;"></div>'+
+    '</div><div class="card-f"><button class="btn pri" data-a="setAdmin">Ingresar</button>'+
+    '<span class="spacer"></span><button class="btn gh" data-a="cerrar">Cancelar</button></div></div></div>';
+}
+
+var ACC={crear:"Creó",editar:"Modificó",eliminar:"Eliminó",importar:"Importó",
+  configurar:"Configuró",claves:"Cambió clave",vaciar:"Borró todo"};
+function accTxt(a){return ACC[a]||a;}
+function accCls(a){return a==="eliminar"||a==="vaciar"?"chip bad":a==="crear"?"chip good":"chip";}
+function fmtTs(ms){
+  var d=new Date(+ms||0),p=function(n){return String(n).padStart(2,"0");};
+  return p(d.getDate())+"-"+p(d.getMonth()+1)+"-"+d.getFullYear()+" "+p(d.getHours())+":"+p(d.getMinutes());
+}
+function detHtml(e){
+  var out=[];
+  if(e.det)out.push(esc(e.det));
+  if(e.camb&&e.camb.length)out.push('<ul class="camb">'+e.camb.map(function(c){
+    return '<li><span class="cc">'+esc(c.c)+'</span> '+esc(c.a||"—")+' <span class="ar">&#8594;</span> <strong>'+esc(c.d||"—")+'</strong></li>';
+  }).join("")+'</ul>');
+  return out.join("") || "—";
+}
+function histFiltrado(){
+  var f=fHist.trim().toLowerCase();
+  var ls=logAdmin.slice().reverse();
+  if(!f)return ls;
+  return ls.filter(function(e){
+    var t=(e.por+" "+accTxt(e.acc)+" "+e.ref+" "+e.det+" "+
+      (e.camb||[]).map(function(c){return c.c+" "+c.a+" "+c.d;}).join(" ")).toLowerCase();
+    return t.indexOf(f)>=0;});
+}
+function historialHtml(){
+  if(!esAdmin)return '<div class="panel"><div class="empty">Ingrese la clave de administrador para ver el historial.</div></div>';
+  var ls=histFiltrado();
+  var h=['<div class="bar-tools"><div class="dfld"><span>Buscar</span>'+
+    '<input type="text" data-t="hist" value="'+esc(fHist)+'" placeholder="nombre, lugar, acción"></div>'+
+    '<span class="chip mono">'+ls.length+' de '+logAdmin.length+' movimientos</span>'+
+    '<span class="spacer"></span>'+
+    '<button class="btn sm" data-a="csvHist">Descargar historial (CSV)</button></div>'];
+  if(!ls.length){
+    h.push('<div class="panel"><div class="empty">'+(logAdmin.length?"Ningún movimiento coincide con la búsqueda.":"Sin movimientos registrados todavía.")+'</div></div>');
+    return h.join("");
+  }
+  h.push('<div class="panel"><div class="scroller"><table><thead><tr>'+
+    '<th>Fecha y hora</th><th>Registra</th><th>Acción</th><th>Reserva / referencia</th><th>Detalle</th>'+
+    '</tr></thead><tbody>');
+  ls.forEach(function(e){
+    h.push('<tr><td class="num">'+esc(fmtTs(e.t))+'</td>'+
+      '<td><strong>'+esc(e.por)+'</strong></td>'+
+      '<td><span class="'+accCls(e.acc)+'">'+esc(accTxt(e.acc))+'</span></td>'+
+      '<td>'+esc(e.ref||"—")+'</td>'+
+      '<td class="det">'+detHtml(e)+'</td></tr>');
+  });
+  h.push('</tbody></table></div></div>');
+  return h.join("");
+}
+function csvHist(){
+  var rows=[["Fecha y hora","Registra","Accion","Referencia","Detalle","Cambios"]];
+  histFiltrado().forEach(function(e){
+    rows.push([fmtTs(e.t),e.por,accTxt(e.acc),e.ref||"",e.det||"",
+      (e.camb||[]).map(function(c){return c.c+": "+(c.a||"-")+" -> "+(c.d||"-");}).join(" | ")]);
+  });
+  descargar("historial-reservas.csv",aCsv(rows));
 }
 
 function statusHtml(){
@@ -296,7 +416,7 @@ function listaHtml(){
 /* ---------- formulario de reserva ---------- */
 var form=null;
 function abrirReserva(pre){
-  form=Object.assign({id:null,lugar:(state.lugares[0]||{}).id||"",persona:"",desde:todayIso(),hasta:todayIso(),abierta:false,adultos:1,ninos:0,nota:"",err:""},pre||{});
+  form=Object.assign({id:null,lugar:(state.lugares[0]||{}).id||"",persona:"",desde:todayIso(),hasta:todayIso(),abierta:false,adultos:1,ninos:0,nota:"",reg:autor,dueno:"",ajena:false,err:""},pre||{});
   pintarForm();
 }
 function pintarForm(){
@@ -304,6 +424,9 @@ function pintarForm(){
   var h=['<div class="ov" data-ov="1"><div class="card"><div class="card-h"><h2>'+(editar?"Editar reserva":"Nueva reserva")+'</h2>'+
     '<button class="btn sm gh" data-a="cerrar">Cerrar</button></div><div class="card-b">'];
   if(f.err)h.push('<div class="err">'+esc(f.err)+'</div>');
+  if(f.ajena)h.push('<div class="notice"><strong>Solo lectura.</strong> Esta reserva fue registrada por <strong>'+esc(f.dueno||"otra persona")+'</strong>. '+
+    'Modificarla o eliminarla requiere la clave de administrador.</div>');
+  else if(f.id&&f.dueno)h.push('<span class="hint">Registrada originalmente por '+esc(f.dueno)+'.</span>');
   h.push('<div class="fld"><label>Lugar / destino</label><select data-f="lugar">'+
     state.lugares.map(function(l){return '<option value="'+l.id+'"'+(l.id===f.lugar?" selected":"")+'>'+esc(l.nombre)+' — cupo '+(l.cupo>0?l.cupo:"libre")+'</option>';}).join("")+'</select></div>');
   h.push('<div class="fld"><label>Asistente'+(editar?"":"s")+'</label>'+
@@ -319,14 +442,20 @@ function pintarForm(){
     '<div class="fld"><label>Niños</label><input type="number" min="0" step="1" data-f="ninos" value="'+(+f.ninos||0)+'"></div></div>');
   h.push('<span class="hint">Se cuentan por separado en el calendario: <strong>A</strong> adultos y <strong>N</strong> niños. Si ingresa varios nombres, cada reserva se crea con esta misma cantidad.</span>');
   h.push('<div class="fld"><label>Nota (opcional)</label><input type="text" data-f="nota" value="'+esc(f.nota||"")+'" placeholder="Turno, contacto, observación"></div>');
-  h.push('</div><div class="card-f"><button class="btn pri" data-a="guardar">Guardar</button>'+
-    (editar?'<button class="btn" data-a="borrar">Eliminar</button>':'')+
+  h.push('<div class="sec"><div class="fld"><label>Registra este cambio</label>'+
+    '<input type="text" data-f="reg" value="'+esc(f.reg||autor)+'" placeholder="Nombre y apellido">'+
+    '<span class="hint">Queda asociado a la reserva y al historial de cambios.</span></div></div>');
+  h.push('</div><div class="card-f"><button class="btn pri" data-a="guardar"'+(f.ajena?" disabled":"")+'>Guardar</button>'+
+    (editar?'<button class="btn" data-a="borrar"'+(f.ajena?" disabled":"")+'>Eliminar</button>':'')+
     '<span class="spacer"></span><button class="btn gh" data-a="cerrar">Cancelar</button></div></div></div>');
   modal=h.join("");paint();
 }
 function guardarReserva(){
   var f=form;
+  if(f.ajena){f.err="Esta reserva requiere la clave de administrador.";return pintarForm();}
   if(!f.lugar){f.err="Seleccione un lugar.";return pintarForm();}
+  var reg=String(f.reg||autor||"").trim();
+  if(!reg){f.err="Indique quién registra el cambio.";return pintarForm();}
   var nombres=f.id?[f.persona.trim()]:f.persona.split(",").map(function(s){return s.trim();}).filter(Boolean);
   if(!nombres.length||!nombres[0]){f.err="Indique al menos un asistente.";return pintarForm();}
   if(!f.desde){f.err="Indique la fecha de inicio.";return pintarForm();}
@@ -336,27 +465,58 @@ function guardarReserva(){
     if(!f.hasta){f.err="Indique la fecha de término o marque «sin fecha de término».";return pintarForm();}
     if(d2n(f.hasta)<d2n(f.desde)){f.err="La fecha de término no puede ser anterior al inicio.";return pintarForm();}
   }
+  if(reg!==autor)guardarAutor(reg);
   if(f.id){
+    var ant=null;
+    state.reservas.forEach(function(r){if(r.id===f.id)ant=Object.assign({},r);});
+    if(ant&&!mio(ant)&&!esAdmin){
+      f.ajena=true;f.dueno=ant.por||"";
+      f.err="Modificar una reserva de otra persona requiere la clave de administrador.";
+      return pintarForm();
+    }
+    var nue=null;
     state.reservas.forEach(function(r){
       if(r.id===f.id){r.lugar=f.lugar;r.persona=nombres[0];r.desde=f.desde;
         r.abierta=!!f.abierta;r.hasta=f.abierta?null:f.hasta;r.nota=f.nota;
-        r.adultos=ad;r.ninos=ni;}
+        r.adultos=ad;r.ninos=ni;r.porMod=reg;r.mod=Date.now();nue=r;}
     });
+    var camb=[];
+    var cmp=function(c,a,d){if(String(a==null?"":a)!==String(d==null?"":d))camb.push({c:c,a:a,d:d});};
+    if(ant&&nue){
+      cmp("Lugar",(lugar(ant.lugar)||{}).nombre,(lugar(nue.lugar)||{}).nombre);
+      cmp("Asistente",ant.persona,nue.persona);
+      cmp("Desde",ant.desde,nue.desde);
+      cmp("Hasta",(ant.abierta||!ant.hasta)?"sin término":ant.hasta,(nue.abierta||!nue.hasta)?"sin término":nue.hasta);
+      cmp("Adultos",ant.adultos,nue.adultos);
+      cmp("Niños",ant.ninos,nue.ninos);
+      cmp("Nota",ant.nota||"",nue.nota||"");
+    }
+    if(!camb.length){modal=null;form=null;paint();return;}
+    apunta("editar",refDe(nue),"",camb);
   }else{
     nombres.forEach(function(p){
-      state.reservas.push({id:uid(),lugar:f.lugar,persona:p,desde:f.desde,
-        hasta:f.abierta?null:f.hasta,abierta:!!f.abierta,adultos:ad,ninos:ni,nota:f.nota,ts:0});
+      var r={id:uid(),lugar:f.lugar,persona:p,desde:f.desde,
+        hasta:f.abierta?null:f.hasta,abierta:!!f.abierta,adultos:ad,ninos:ni,nota:f.nota,
+        por:reg,creado:Date.now(),ts:0};
+      state.reservas.push(r);
+      apunta("crear",refDe(r),resumen(r),[]);
     });
   }
-  nombres.forEach(function(p){if(state.asistentes.indexOf(p)<0)state.asistentes.push(p);});
   modal=null;form=null;save();
 }
 
 /* ---------- configuración ---------- */
+function listaLugares(){
+  return state.lugares.map(function(l){return l.nombre+" (cupo "+(l.cupo>0?l.cupo:"libre")+")";}).join(", ");
+}
+function exigirAdmin(){
+  adminTmp="";adminErr="Esta acción requiere la clave de administrador.";modal=adminHtml();paint();
+}
+
 var cfg=null;
 function abrirCfg(){
   cfg={titulo:state.titulo,lugares:state.lugares.map(function(l){return Object.assign({},l);}),
-       asistentes:state.asistentes.join("\n"),codigo:""};
+       asistentes:state.asistentes.join("\n"),codigo:"",admin:""};
   pintarCfg();
 }
 function pintarCfg(){
@@ -380,6 +540,10 @@ function pintarCfg(){
     '<input type="text" data-c="codigo" value="'+esc(cfg.codigo)+'" placeholder="Dejar vacío para mantener el actual" autocomplete="off">'+
     '<span class="hint">Entre 4 y 24 caracteres, números o letras sin espacios. Al guardar, el código nuevo rige para todos: quienes ya estén dentro deberán volver a ingresarlo. '+
     'Si se pierde, el código maestro definido en la variable <strong>CODIGO_ACCESO</strong> de Vercel siempre funciona.</span></div>');
+  h.push('<div class="sec"><h3>Clave de administrador</h3>'+
+    '<input type="text" data-c="admin" value="'+esc(cfg.admin)+'" placeholder="Dejar vacío para mantener la actual" autocomplete="off">'+
+    '<span class="hint">Entre 4 y 24 caracteres, números o letras sin espacios. Habilita el historial, esta configuración, la importación y la edición de reservas de terceros. '+
+    'Si se pierde, la variable <strong>CODIGO_ADMIN</strong> de Vercel siempre funciona.</span></div>');
   h.push('<div class="sec"><h3>Datos</h3><div style="display:flex;gap:8px;flex-wrap:wrap">'+
     '<button class="btn sm" data-a="import">Importar CSV…</button>'+
     '<button class="btn sm" data-a="plantilla">Descargar plantilla CSV</button>'+
@@ -391,18 +555,34 @@ function pintarCfg(){
   modal=h.join("");paint();
 }
 function guardarCfg(){
+  var antT=state.titulo,antL=listaLugares(),antA=state.asistentes.join(", "),antN=state.reservas.length;
   state.titulo=cfg.titulo.trim()||"Reserva de Residencias";
   var vivos={};
   cfg.lugares.forEach(function(l){if(!l.nombre.trim())l.nombre="Sin nombre";l.cupo=Math.max(0,+l.cupo||0);vivos[l.id]=1;});
   state.lugares=cfg.lugares;
   state.reservas=state.reservas.filter(function(r){return vivos[r.lugar];});
   state.asistentes=cfg.asistentes.split("\n").map(function(s){return s.trim();}).filter(Boolean);
-  var nc=(cfg.codigo||"").trim();
+
+  var camb=[],re=/^[0-9A-Za-z._-]{4,24}$/;
+  if(antT!==state.titulo)camb.push({c:"Título",a:antT,d:state.titulo});
+  var nl=listaLugares();if(antL!==nl)camb.push({c:"Lugares",a:antL,d:nl});
+  var na=state.asistentes.join(", ");if(antA!==na)camb.push({c:"Asistentes",a:antA,d:na});
+  if(antN!==state.reservas.length)camb.push({c:"Reservas (quitadas al eliminar lugares)",a:antN,d:state.reservas.length});
+
+  var msgs=[],nc=(cfg.codigo||"").trim(),nk=(cfg.admin||"").trim();
   if(nc){
-    if(!/^[0-9A-Za-z._-]{4,24}$/.test(nc)){aviso="El código debe tener entre 4 y 24 caracteres, sin espacios. No se cambió.";}
-    else nuevoCodigo=nc;
+    if(!re.test(nc))aviso="El código de acceso debe tener entre 4 y 24 caracteres, sin espacios. No se cambió.";
+    else{nuevoCodigo=nc;msgs.push("código de acceso");}
   }
-  modal=null;cfg=null;save();
+  if(nk){
+    if(!re.test(nk))aviso=(aviso?aviso+" ":"")+"La clave de administrador debe tener entre 4 y 24 caracteres, sin espacios. No se cambió.";
+    else{nuevoAdmin=nk;msgs.push("clave de administrador");}
+  }
+  if(msgs.length)apunta("claves","","Se actualizó el "+msgs.join(" y la ")+".",[]);
+  if(camb.length)apunta("configurar","","",camb);
+  modal=null;cfg=null;
+  if(!camb.length&&!msgs.length){paint();return;}
+  save();
 }
 function descargar(nombre,txt){
   var b=new Blob([txt],{type:"text/csv;charset=utf-8"});
@@ -531,9 +711,13 @@ function aplicarImport(){
   if(imp.modo==="rep")state.reservas=[];
   r.ok.forEach(function(o){
     state.reservas.push({id:uid(),lugar:mapa[o.lk],persona:o.persona,desde:o.desde,
-      hasta:o.abierta?null:o.hasta,abierta:o.abierta,adultos:o.adultos,ninos:o.ninos,nota:o.nota,ts:0});
+      hasta:o.abierta?null:o.hasta,abierta:o.abierta,adultos:o.adultos,ninos:o.ninos,nota:o.nota,
+      por:autor,creado:Date.now(),ts:0});
     if(state.asistentes.indexOf(o.persona)<0)state.asistentes.push(o.persona);
   });
+  apunta("importar","",r.ok.length+" reserva(s) importadas, "+
+    (imp.modo==="rep"?"reemplazando todas las anteriores":"agregadas a las existentes")+
+    (r.nuevos.length?". Lugares nuevos: "+r.nuevos.map(function(n){return n.nombre;}).join(", "):"")+".",[]);
   modal=null;imp=null;cfg=null;save();
 }
 function pintarImport(){
@@ -600,33 +784,65 @@ document.addEventListener("click",function(e){
   else if(a==="preset"){vp.fin=n2d(d2n(vp.inicio)+(+v)-1);saveVp();paint();}
   else if(a==="tab"){vp.tab=v;saveVp();paint();}
   else if(a==="entrar"){gate.err="";guardarCod((gate.valor||"").trim());gate.valor="";cargar();}
+  else if(a==="quien"){autorTmp=autor;pedirAutor=true;paint();}
+  else if(a==="setAutor"){var na2=(autorTmp||"").trim();
+    if(!na2)return;
+    guardarAutor(na2);autorTmp="";pedirAutor=false;
+    if(rev===0&&link==="ok")guardarServidor();else paint();}
+  else if(a==="cancelAutor"){pedirAutor=false;autorTmp="";paint();}
+  else if(a==="unlock"){adminTmp="";adminErr="";modal=adminHtml();paint();}
+  else if(a==="setAdmin"){var nk2=(adminTmp||"").trim();adminTmp="";modal=null;
+    if(!nk2){paint();return;}
+    guardarAdmin(nk2);adminErr="";cargar();}
+  else if(a==="lock"){guardarAdmin("");esAdmin=false;logAdmin=[];adminErr="";
+    if(vp.tab==="hist"){vp.tab="cal";saveVp();}paint();}
+  else if(a==="csvHist"){csvHist();}
   else if(a==="salir"){guardarCod("");authed=false;link="wait";gate={valor:"",err:"",probando:false};paint();}
   else if(a==="nueva"){abrirReserva({});}
   else if(a==="cerrar"){modal=null;form=null;cfg=null;imp=null;paint();}
-  else if(a==="import"){abrirImport();}
+  else if(a==="import"){if(!esAdmin){exigirAdmin();return;}abrirImport();}
   else if(a==="plantilla"){plantilla();}
   else if(a==="impAnalizar"){analizar();pintarImport();}
   else if(a==="impAplicar"){aplicarImport();}
   else if(a==="guardar"){guardarReserva();}
-  else if(a==="borrar"){state.reservas=state.reservas.filter(function(r){return r.id!==form.id;});modal=null;form=null;save();}
+  else if(a==="borrar"){
+    var rb=null;state.reservas.forEach(function(x){if(x.id===form.id)rb=x;});
+    if(rb&&!mio(rb)&&!esAdmin){form.ajena=true;form.dueno=rb.por||"";
+      form.err="Eliminar una reserva de otra persona requiere la clave de administrador.";pintarForm();return;}
+    if(rb)apunta("eliminar",refDe(rb),resumen(rb),[]);
+    state.reservas=state.reservas.filter(function(r){return r.id!==form.id;});
+    modal=null;form=null;save();}
   else if(a==="pick"){form.persona=form.persona.trim()?form.persona.replace(/,\s*$/,"")+", "+v:v;pintarForm();}
   else if(a==="edit"){editar(v);}
-  else if(a==="cfg"){abrirCfg();}
+  else if(a==="cfg"){if(!esAdmin){exigirAdmin();return;}abrirCfg();}
   else if(a==="addLugar"){cfg.lugares.push({id:uid(),nombre:"",cupo:0,color:PALETTE[cfg.lugares.length%PALETTE.length],nota:""});pintarCfg();}
   else if(a==="delLugar"){cfg.lugares.splice(+v,1);pintarCfg();}
   else if(a==="cfgOk"){guardarCfg();}
-  else if(a==="csv"){csv();}
-  else if(a==="vaciar"){if(confirm("¿Eliminar todas las reservas registradas?")){state.reservas=[];modal=null;cfg=null;save();}}
+  else if(a==="csv"){if(!esAdmin){exigirAdmin();return;}csv();}
+  else if(a==="vaciar"){if(!esAdmin){exigirAdmin();return;}
+    if(confirm("¿Eliminar todas las reservas registradas?")){
+      apunta("vaciar","","Se eliminaron "+state.reservas.length+" reserva(s).",[]);
+      state.reservas=[];modal=null;cfg=null;save();}}
 });
 function editar(id){
   var r=null;state.reservas.forEach(function(x){if(x.id===id)r=x;});
-  if(!r||readOnly)return;
+  if(!r)return;
   abrirReserva({id:r.id,lugar:r.lugar,persona:r.persona,desde:r.desde,
-    hasta:r.hasta||r.desde,abierta:!!r.abierta,adultos:+r.adultos||0,ninos:+r.ninos||0,nota:r.nota||""});
+    hasta:r.hasta||r.desde,abierta:!!r.abierta,adultos:+r.adultos||0,ninos:+r.ninos||0,nota:r.nota||"",
+    reg:autor,dueno:r.por||"",ajena:!mio(r)&&!esAdmin});
 }
 document.addEventListener("input",function(e){
   var el=e.target;
   if(el.dataset.g){gate[el.dataset.g]=el.value;return;}
+  if(el.dataset.t){
+    var kt=el.dataset.t;
+    if(kt==="autor")autorTmp=el.value;
+    else if(kt==="admin")adminTmp=el.value;
+    else if(kt==="hist"){fHist=el.value;paint();
+      var ih=document.querySelector('[data-t="hist"]');
+      if(ih){ih.focus();ih.setSelectionRange(ih.value.length,ih.value.length);}}
+    return;
+  }
   if(el.dataset.f&&form){
     var k=el.dataset.f;
     if(k==="abierta"){form.abierta=el.checked;pintarForm();return;}
@@ -689,7 +905,13 @@ document.addEventListener("pointerup",function(){
 document.addEventListener("keydown",function(e){
   if(e.key==="Escape"&&modal){modal=null;form=null;cfg=null;imp=null;paint();}
   if(e.key==="Enter"&&!authed){var i=document.querySelector('[data-g="valor"]');
-    if(i){gate.err="";guardarCod((i.value||"").trim());gate.valor="";cargar();}}
+    if(i){gate.err="";guardarCod((i.value||"").trim());gate.valor="";cargar();}return;}
+  if(e.key==="Enter"&&authed&&(!autor||pedirAutor)){var ia=document.querySelector('[data-t="autor"]');
+    if(ia&&ia.value.trim()){guardarAutor(ia.value.trim());autorTmp="";pedirAutor=false;
+      if(rev===0&&link==="ok")guardarServidor();else paint();}return;}
+  if(e.key==="Enter"&&modal&&document.querySelector('[data-t="admin"]')){
+    var ik=document.querySelector('[data-t="admin"]');
+    if(ik&&ik.value.trim()){guardarAdmin(ik.value.trim());adminTmp="";adminErr="";modal=null;cargar();}}
 });
 
 paint();

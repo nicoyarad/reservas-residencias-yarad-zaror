@@ -84,6 +84,8 @@ h1{font-size:clamp(21px,2.4vw,29px);font-weight:700}
 .notice{border:1px solid var(--line);background:var(--surface-2);border-radius:var(--r);
   padding:9px 12px;font-size:12.5px;color:var(--ink-2);margin-bottom:12px}
 .notice strong{color:var(--ink)}
+.notice code{font-family:"IBM Plex Mono",monospace;font-size:11.5px;background:var(--ground);
+  border:1px solid var(--line);border-radius:3px;padding:0 3px}
 
 /* ---------- timeline ---------- */
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh);overflow:hidden}
@@ -203,6 +205,16 @@ textarea{min-height:84px;resize:vertical}
 .gate .lead{font-size:13px;color:var(--ink-2)}
 .gate input{font-family:"IBM Plex Mono",monospace;font-size:20px;letter-spacing:.22em;text-align:center;
   font-variant-numeric:tabular-nums}
+.gate input[type=text]{letter-spacing:0;font-family:"IBM Plex Sans",sans-serif;font-size:15px;text-align:left}
+.btn.adm{background:var(--accent-soft);border-color:var(--accent);color:var(--ink);font-weight:600}
+.acts .btn strong{font-weight:600}
+ul.camb{margin:3px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:2px}
+ul.camb li{font-size:11.5px;color:var(--ink-2)}
+ul.camb .cc{display:inline-block;min-width:74px;color:var(--ink-3);font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+ul.camb .ar{color:var(--ink-3)}
+td.det{max-width:420px}
+.chip.good{background:var(--accent-soft);border-color:var(--accent);color:var(--ink);font-weight:600}
 code.fmt{display:block;background:var(--surface-2);border:1px solid var(--line);border-radius:5px;
   padding:8px 10px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;overflow-x:auto;white-space:pre;color:var(--ink-2)}
 @media (max-width:640px){
