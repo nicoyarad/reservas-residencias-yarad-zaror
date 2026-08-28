@@ -13,7 +13,7 @@ var link="wait",readOnly=false,saving=false;
 var modal=null,drag=null;
 var codigo="",authed=false,gate={valor:"",err:"",probando:false},nuevoCodigo="",nuevoAdmin="";
 var autor="",admin="",esAdmin=false,logAdmin=[],entradas=[];
-var pedirAutor=false,pedirAdmin=false,autorTmp="",adminTmp="",adminErr="",fHist="";
+var pedirAutor=false,pedirAdmin=false,autorTmp="",adminTmp="",adminErr="",fHist="",pend="";
 try{codigo=localStorage.getItem("resid.cod")||"";}catch(e){}
 try{autor=localStorage.getItem("resid.por")||"";}catch(e){}
 try{admin=localStorage.getItem("resid.adm")||"";}catch(e){}
@@ -60,13 +60,13 @@ function migrar(){
   if(!state.reservas)state.reservas=[];
   state.reservas.forEach(function(r){if(r.adultos==null)r.adultos=1;if(r.ninos==null)r.ninos=0;});
 }
-function cargar(){
+function cargar(luego){
   if(!codigo){authed=false;link="wait";gate.probando=false;paint();return;}
   gate.probando=true;
   fetch("/api/estado",{cache:"no-store",headers:cab()}).then(function(r){
     gate.probando=false;
-    if(r.status===401){authed=false;guardarCod("");gate.err="Código incorrecto.";paint();return null;}
-    if(r.status===503){authed=true;link="nostore";paint();return null;}
+    if(r.status===401){authed=false;guardarCod("");gate.err="Código incorrecto.";pend="";paint();return null;}
+    if(r.status===503){authed=true;link="nostore";pend="";paint();return null;}
     if(!r.ok)throw new Error("HTTP "+r.status);
     return r.json();
   }).then(function(d){
@@ -76,6 +76,7 @@ function cargar(){
     if(d.adminError){guardarAdmin("");esAdmin=false;adminErr="La clave de administrador no es válida.";}
     if(d.estado){state=d.estado;migrar();link="ok";paint();}
     else{link="ok";guardarServidor();}
+    if(luego)luego();
   }).catch(function(e){gate.probando=false;link="err";detalle=String((e&&e.message)||"");paint();});
 }
 function guardarServidor(){
@@ -509,8 +510,27 @@ function guardarReserva(){
 function listaLugares(){
   return state.lugares.map(function(l){return l.nombre+" (cupo "+(l.cupo>0?l.cupo:"libre")+")";}).join(", ");
 }
-function exigirAdmin(){
-  adminTmp="";adminErr="Esta acción requiere la clave de administrador.";modal=adminHtml();paint();
+function exigirAdmin(acc){
+  pend=acc||"";adminTmp="";
+  adminErr="Esta acción requiere la clave de administrador.";modal=adminHtml();paint();
+}
+/* Valida la clave contra el servidor y, si es correcta, retoma la accion pendiente. */
+function aplicarAdmin(v){
+  v=String(v||"").trim();
+  if(!v){modal=null;paint();return;}
+  adminTmp="";adminErr="";modal=null;guardarAdmin(v);
+  cargar(function(){
+    if(!esAdmin){
+      adminErr="La clave de administrador no es válida. Verifique e intente de nuevo.";
+      modal=adminHtml();paint();return;
+    }
+    var p=pend;pend="";
+    if(p==="cfg")abrirCfg();
+    else if(p==="import")abrirImport();
+    else if(p==="csv"){csv();aviso="Modo administrador activo. Se descargó el archivo de reservas.";paint();}
+    else if(p==="vaciar"){aviso="Modo administrador activo. Vuelva a pulsar «Borrar todas las reservas» para confirmar.";paint();}
+    else{aviso="Modo administrador activo: historial, configuración e importación habilitados.";paint();}
+  });
 }
 
 var cfg=null;
@@ -790,17 +810,15 @@ document.addEventListener("click",function(e){
     guardarAutor(na2);autorTmp="";pedirAutor=false;
     if(rev===0&&link==="ok")guardarServidor();else paint();}
   else if(a==="cancelAutor"){pedirAutor=false;autorTmp="";paint();}
-  else if(a==="unlock"){adminTmp="";adminErr="";modal=adminHtml();paint();}
-  else if(a==="setAdmin"){var nk2=(adminTmp||"").trim();adminTmp="";modal=null;
-    if(!nk2){paint();return;}
-    guardarAdmin(nk2);adminErr="";cargar();}
-  else if(a==="lock"){guardarAdmin("");esAdmin=false;logAdmin=[];adminErr="";
+  else if(a==="unlock"){pend="";adminTmp="";adminErr="";modal=adminHtml();paint();}
+  else if(a==="setAdmin"){aplicarAdmin(adminTmp);}
+  else if(a==="lock"){guardarAdmin("");esAdmin=false;logAdmin=[];adminErr="";pend="";aviso="";
     if(vp.tab==="hist"){vp.tab="cal";saveVp();}paint();}
   else if(a==="csvHist"){csvHist();}
   else if(a==="salir"){guardarCod("");authed=false;link="wait";gate={valor:"",err:"",probando:false};paint();}
   else if(a==="nueva"){abrirReserva({});}
-  else if(a==="cerrar"){modal=null;form=null;cfg=null;imp=null;paint();}
-  else if(a==="import"){if(!esAdmin){exigirAdmin();return;}abrirImport();}
+  else if(a==="cerrar"){modal=null;form=null;cfg=null;imp=null;pend="";paint();}
+  else if(a==="import"){if(!esAdmin){exigirAdmin("import");return;}abrirImport();}
   else if(a==="plantilla"){plantilla();}
   else if(a==="impAnalizar"){analizar();pintarImport();}
   else if(a==="impAplicar"){aplicarImport();}
@@ -814,12 +832,12 @@ document.addEventListener("click",function(e){
     modal=null;form=null;save();}
   else if(a==="pick"){form.persona=form.persona.trim()?form.persona.replace(/,\s*$/,"")+", "+v:v;pintarForm();}
   else if(a==="edit"){editar(v);}
-  else if(a==="cfg"){if(!esAdmin){exigirAdmin();return;}abrirCfg();}
+  else if(a==="cfg"){if(!esAdmin){exigirAdmin("cfg");return;}abrirCfg();}
   else if(a==="addLugar"){cfg.lugares.push({id:uid(),nombre:"",cupo:0,color:PALETTE[cfg.lugares.length%PALETTE.length],nota:""});pintarCfg();}
   else if(a==="delLugar"){cfg.lugares.splice(+v,1);pintarCfg();}
   else if(a==="cfgOk"){guardarCfg();}
-  else if(a==="csv"){if(!esAdmin){exigirAdmin();return;}csv();}
-  else if(a==="vaciar"){if(!esAdmin){exigirAdmin();return;}
+  else if(a==="csv"){if(!esAdmin){exigirAdmin("csv");return;}csv();}
+  else if(a==="vaciar"){if(!esAdmin){exigirAdmin("vaciar");return;}
     if(confirm("¿Eliminar todas las reservas registradas?")){
       apunta("vaciar","","Se eliminaron "+state.reservas.length+" reserva(s).",[]);
       state.reservas=[];modal=null;cfg=null;save();}}
@@ -911,7 +929,7 @@ document.addEventListener("keydown",function(e){
       if(rev===0&&link==="ok")guardarServidor();else paint();}return;}
   if(e.key==="Enter"&&modal&&document.querySelector('[data-t="admin"]')){
     var ik=document.querySelector('[data-t="admin"]');
-    if(ik&&ik.value.trim()){guardarAdmin(ik.value.trim());adminTmp="";adminErr="";modal=null;cargar();}}
+    if(ik&&ik.value.trim())aplicarAdmin(ik.value);}
 });
 
 paint();
