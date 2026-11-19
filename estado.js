@@ -273,6 +273,10 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "GET, POST");
     return res.status(405).json({ error: "metodo_no_permitido" });
   } catch (e) {
-    return res.status(500).json({ error: "fallo_almacenamiento", mensaje: String((e && e.message) || e) });
+    const causa = (e && e.cause && (e.cause.code || e.cause.message)) || "";
+    const host = String(REDIS_URL || "").replace(/^https?:\/\//, "").split("/")[0];
+    const salida = { error: "fallo_almacenamiento", mensaje: String((e && e.message) || e) };
+    if (dado === CODIGO_MAESTRO) { salida.causa = causa; salida.destino = host; }
+    return res.status(500).json(salida);
   }
 }
